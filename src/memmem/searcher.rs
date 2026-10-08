@@ -5,6 +5,8 @@ use crate::arch::all::{
 
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::neon::packedpair as neon;
+#[cfg(target_abi = "polyasm")]
+use crate::arch::polyasm::simd::packedpair as polyasm;
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
 use crate::arch::wasm32::simd128::packedpair as simd128;
 #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
@@ -109,6 +111,26 @@ impl Searcher {
                 Searcher::twoway(needle, rabinkarp, prestrat)
             }
         }
+        #[cfg(target_abi = "polyasm")]
+        {
+            if let Some(pp) = polyasm::Finder::with_pair(needle, pair) {
+                if do_packed_search(needle) {
+                    trace!("building PolyASM substring searcher");
+                    let kind = SearcherKind { polyasm: pp };
+                    Searcher { call: searcher_kind_polyasm, kind, rabinkarp }
+                } else if prefilter.is_none() {
+                    Searcher::twoway(needle, rabinkarp, None)
+                } else {
+                    let prestrat = Prefilter::polyasm(pp, needle);
+                    Searcher::twoway(needle, rabinkarp, Some(prestrat))
+                }
+            } else if prefilter.is_none() {
+                Searcher::twoway(needle, rabinkarp, None)
+            } else {
+                let prestrat = Prefilter::fallback(ranker, pair, needle);
+                Searcher::twoway(needle, rabinkarp, prestrat)
+            }
+        }
         #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
         {
             if let Some(pp) = simd128::Finder::with_pair(needle, pair) {
@@ -151,6 +173,7 @@ impl Searcher {
         }
         #[cfg(not(any(
             all(target_arch = "x86_64", target_feature = "sse2"),
+            target_abi = "polyasm",
             all(target_arch = "wasm32", target_feature = "simd128"),
             target_arch = "aarch64"
         )))]
@@ -251,6 +274,8 @@ union SearcherKind {
     sse2: crate::arch::x86_64::sse2::packedpair::Finder,
     #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
     avx2: crate::arch::x86_64::avx2::packedpair::Finder,
+    #[cfg(target_abi = "polyasm")]
+    polyasm: crate::arch::polyasm::simd::packedpair::Finder,
     #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
     simd128: crate::arch::wasm32::simd128::packedpair::Finder,
     #[cfg(target_arch = "aarch64")]
@@ -387,6 +412,27 @@ unsafe fn searcher_kind_avx2(
     needle: &[u8],
 ) -> Option<usize> {
     let finder = &searcher.kind.avx2;
+    if haystack.len() < finder.min_haystack_len() {
+        searcher.rabinkarp.find(haystack, needle)
+    } else {
+        finder.find(haystack, needle)
+    }
+}
+
+/// Reads from the `polyasm` field of `SearcherKind` to execute the PolyASM
+/// vectorized substring search implementation.
+///
+/// # Safety
+///
+/// Callers must ensure that the `searcher.kind.polyasm` union field is set.
+#[cfg(target_abi = "polyasm")]
+unsafe fn searcher_kind_polyasm(
+    searcher: &Searcher,
+    _prestate: &mut PrefilterState,
+    haystack: &[u8],
+    needle: &[u8],
+) -> Option<usize> {
+    let finder = &searcher.kind.polyasm;
     if haystack.len() < finder.min_haystack_len() {
         searcher.rabinkarp.find(haystack, needle)
     } else {
@@ -668,6 +714,21 @@ impl Prefilter {
         }
     }
 
+    /// Return a prefilter using a PolyASM vector algorithm.
+    #[cfg(target_abi = "polyasm")]
+    #[inline]
+    fn polyasm(finder: polyasm::Finder, needle: &[u8]) -> Prefilter {
+        trace!("building PolyASM prefilter");
+        let rarest_offset = finder.pair().index1();
+        let rarest_byte = needle[usize::from(rarest_offset)];
+        Prefilter {
+            call: prefilter_kind_polyasm,
+            kind: PrefilterKind { polyasm: finder },
+            rarest_byte,
+            rarest_offset,
+        }
+    }
+
     /// Return a prefilter using a wasm32 simd128 vector algorithm.
     #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
     #[inline]
@@ -761,6 +822,8 @@ union PrefilterKind {
     avx2: crate::arch::x86_64::avx2::packedpair::Finder,
     #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
     simd128: crate::arch::wasm32::simd128::packedpair::Finder,
+    #[cfg(target_abi = "polyasm")]
+    polyasm: crate::arch::polyasm::simd::packedpair::Finder,
     #[cfg(target_arch = "aarch64")]
     neon: crate::arch::aarch64::neon::packedpair::Finder,
 }
@@ -818,6 +881,25 @@ unsafe fn prefilter_kind_avx2(
     haystack: &[u8],
 ) -> Option<usize> {
     let finder = &strat.kind.avx2;
+    if haystack.len() < finder.min_haystack_len() {
+        strat.find_simple(haystack)
+    } else {
+        finder.find_prefilter(haystack)
+    }
+}
+
+/// Reads from the `polyasm` field of `PrefilterKind` to execute the PolyASM
+/// prefilter.
+///
+/// # Safety
+///
+/// Callers must ensure that the `strat.kind.polyasm` union field is set.
+#[cfg(target_abi = "polyasm")]
+unsafe fn prefilter_kind_polyasm(
+    strat: &Prefilter,
+    haystack: &[u8],
+) -> Option<usize> {
+    let finder = &strat.kind.polyasm;
     if haystack.len() < finder.min_haystack_len() {
         strat.find_simple(haystack)
     } else {

@@ -124,11 +124,15 @@ impl SensibleMoveMask {
     /// the bytes.
     #[inline(always)]
     fn get_for_offset(self) -> u32 {
-        #[cfg(target_endian = "big")]
+        #[cfg(target_abi = "polyasm")]
+        {
+            self.0
+        }
+        #[cfg(all(not(target_abi = "polyasm"), target_endian = "big"))]
         {
             self.0.swap_bytes()
         }
-        #[cfg(target_endian = "little")]
+        #[cfg(all(not(target_abi = "polyasm"), target_endian = "little"))]
         {
             self.0
         }
@@ -510,5 +514,72 @@ mod wasm_simd128 {
         unsafe fn or(self, vector2: Self) -> v128 {
             v128_or(self, vector2)
         }
+    }
+}
+
+#[cfg(target_abi = "polyasm")]
+mod polyasm_vector {
+    use core::polyasm::vector::{
+        and_i8x16, and_i8x32, and_i8x64, bitmask_i8x16, bitmask_i8x32,
+        bitmask_i8x64, eq_i8x16, eq_i8x32, eq_i8x64, load_i8x16, load_i8x32,
+        load_i8x64, or_i8x16, or_i8x32, or_i8x64, splat_i8x16, splat_i8x32,
+        splat_i8x64, I8x16, I8x32, I8x64,
+    };
+
+    use super::{SensibleMoveMask, Vector};
+
+    macro_rules! polyasm_vectors {
+        ($($vector:ty, $bytes:literal, $splat:ident, $load:ident, $eq:ident, $and:ident, $or:ident, $bitmask:ident;)+) => {$(
+            impl Vector for $vector {
+                const BYTES: usize = $bytes;
+                const ALIGN: usize = Self::BYTES - 1;
+
+                type Mask = SensibleMoveMask;
+
+                #[inline(always)]
+                unsafe fn splat(byte: u8) -> Self {
+                    $splat(byte)
+                }
+
+                #[inline(always)]
+                unsafe fn load_aligned(data: *const u8) -> Self {
+                    // SAFETY: the caller guarantees the width is readable.
+                    unsafe { $load(data) }
+                }
+
+                #[inline(always)]
+                unsafe fn load_unaligned(data: *const u8) -> Self {
+                    // SAFETY: as above; PolyASM's vector load names no
+                    // alignment, so both spellings are the same instruction.
+                    unsafe { $load(data) }
+                }
+
+                #[inline(always)]
+                unsafe fn movemask(self) -> SensibleMoveMask {
+                    SensibleMoveMask($bitmask(self) as u32)
+                }
+
+                #[inline(always)]
+                unsafe fn cmpeq(self, vector2: Self) -> Self {
+                    $eq(self, vector2)
+                }
+
+                #[inline(always)]
+                unsafe fn and(self, vector2: Self) -> Self {
+                    $and(self, vector2)
+                }
+
+                #[inline(always)]
+                unsafe fn or(self, vector2: Self) -> Self {
+                    $or(self, vector2)
+                }
+            }
+        )+};
+    }
+
+    polyasm_vectors! {
+        I8x16, 16, splat_i8x16, load_i8x16, eq_i8x16, and_i8x16, or_i8x16, bitmask_i8x16;
+        I8x32, 32, splat_i8x32, load_i8x32, eq_i8x32, and_i8x32, or_i8x32, bitmask_i8x32;
+        I8x64, 64, splat_i8x64, load_i8x64, eq_i8x64, and_i8x64, or_i8x64, bitmask_i8x64;
     }
 }
