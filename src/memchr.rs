@@ -522,7 +522,12 @@ unsafe fn memchr_raw(
     {
         crate::arch::aarch64::memchr::memchr_raw(needle, start, end)
     }
+    #[cfg(target_arch = "polyasm")]
+    {
+        crate::arch::polyasm::memchr_raw(needle, start, end)
+    }
     #[cfg(not(any(
+        target_arch = "polyasm",
         target_arch = "x86_64",
         all(target_arch = "wasm32", target_feature = "simd128"),
         target_arch = "aarch64"
@@ -555,7 +560,12 @@ unsafe fn memrchr_raw(
     {
         crate::arch::aarch64::memchr::memrchr_raw(needle, start, end)
     }
+    #[cfg(target_arch = "polyasm")]
+    {
+        crate::arch::polyasm::memrchr_raw(needle, start, end)
+    }
     #[cfg(not(any(
+        target_arch = "polyasm",
         target_arch = "x86_64",
         all(target_arch = "wasm32", target_feature = "simd128"),
         target_arch = "aarch64"
@@ -589,7 +599,12 @@ unsafe fn memchr2_raw(
     {
         crate::arch::aarch64::memchr::memchr2_raw(needle1, needle2, start, end)
     }
+    #[cfg(target_arch = "polyasm")]
+    {
+        crate::arch::polyasm::memchr2_raw(needle1, needle2, start, end)
+    }
     #[cfg(not(any(
+        target_arch = "polyasm",
         target_arch = "x86_64",
         all(target_arch = "wasm32", target_feature = "simd128"),
         target_arch = "aarch64"
@@ -626,7 +641,12 @@ unsafe fn memrchr2_raw(
             needle1, needle2, start, end,
         )
     }
+    #[cfg(target_arch = "polyasm")]
+    {
+        crate::arch::polyasm::memrchr2_raw(needle1, needle2, start, end)
+    }
     #[cfg(not(any(
+        target_arch = "polyasm",
         target_arch = "x86_64",
         all(target_arch = "wasm32", target_feature = "simd128"),
         target_arch = "aarch64"
@@ -668,7 +688,14 @@ unsafe fn memchr3_raw(
             needle1, needle2, needle3, start, end,
         )
     }
+    #[cfg(target_arch = "polyasm")]
+    {
+        crate::arch::polyasm::memchr3_raw(
+            needle1, needle2, needle3, start, end,
+        )
+    }
     #[cfg(not(any(
+        target_arch = "polyasm",
         target_arch = "x86_64",
         all(target_arch = "wasm32", target_feature = "simd128"),
         target_arch = "aarch64"
@@ -710,7 +737,14 @@ unsafe fn memrchr3_raw(
             needle1, needle2, needle3, start, end,
         )
     }
+    #[cfg(target_arch = "polyasm")]
+    {
+        crate::arch::polyasm::memrchr3_raw(
+            needle1, needle2, needle3, start, end,
+        )
+    }
     #[cfg(not(any(
+        target_arch = "polyasm",
         target_arch = "x86_64",
         all(target_arch = "wasm32", target_feature = "simd128"),
         target_arch = "aarch64"

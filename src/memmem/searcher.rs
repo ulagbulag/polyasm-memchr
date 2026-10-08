@@ -149,10 +149,18 @@ impl Searcher {
                 Searcher::twoway(needle, rabinkarp, prestrat)
             }
         }
+        #[cfg(target_arch = "polyasm")]
+        {
+            let _ = (prefilter, pair);
+            trace!("building PolyASM substring searcher");
+            let kind = SearcherKind { empty: () };
+            Searcher { call: searcher_kind_polyasm, kind, rabinkarp }
+        }
         #[cfg(not(any(
             all(target_arch = "x86_64", target_feature = "sse2"),
             all(target_arch = "wasm32", target_feature = "simd128"),
-            target_arch = "aarch64"
+            target_arch = "aarch64",
+            target_arch = "polyasm"
         )))]
         {
             if prefilter.is_none() {
@@ -216,10 +224,18 @@ impl Searcher {
         if haystack.len() < needle.len() {
             None
         } else {
-            // SAFETY: By construction, we've ensured that the function
-            // in `self.call` is properly paired with the union used in
-            // `self.kind`.
-            unsafe { (self.call)(self, prestate, haystack, needle) }
+            cfg_select! {
+                target_arch = "polyasm" => {
+                    let _ = prestate;
+                    crate::arch::polyasm::find(haystack, needle)
+                }
+                _ => {
+                    // SAFETY: By construction, we've ensured that the
+                    // function in `self.call` is properly paired with the
+                    // union used in `self.kind`.
+                    unsafe { (self.call)(self, prestate, haystack, needle) }
+                }
+            }
         }
     }
 }
@@ -290,6 +306,22 @@ unsafe fn searcher_kind_empty(
     _needle: &[u8],
 ) -> Option<usize> {
     Some(0)
+}
+
+/// Runs the substring search of the memory extension instruction set of
+/// PolyASM, which reads zero fields of `SearcherKind`.
+///
+/// # Safety
+///
+/// Every union field of `SearcherKind` suits this function.
+#[cfg(target_arch = "polyasm")]
+unsafe fn searcher_kind_polyasm(
+    _searcher: &Searcher,
+    _prestate: &mut PrefilterState,
+    haystack: &[u8],
+    needle: &[u8],
+) -> Option<usize> {
+    crate::arch::polyasm::find(haystack, needle)
 }
 
 /// Reads from the `one_byte` field of `SearcherKind` to handle the case of
